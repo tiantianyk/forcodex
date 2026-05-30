@@ -50,6 +50,7 @@ int main() {
     };
     quick_sort(quick_sort, a3, 0, N - 1);
     print_array("快速排序", a3, N);
+    int b;
 
     return 0;
 }
