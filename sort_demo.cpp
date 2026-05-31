@@ -50,7 +50,23 @@ int main() {
     };
     quick_sort(quick_sort, a3, 0, N - 1);
     print_array("快速排序", a3, N);
-    int b;
+
+    int b = 3;
+    int a = 4;
+    int c = a + b;
+
+    // 将 c 插入已排序的 a3 中
+    int a4[N + 1];
+    int pos = 0;
+    while (pos < N && a3[pos] < c) {
+        a4[pos] = a3[pos];
+        ++pos;
+    }
+    a4[pos] = c;
+    for (int i = pos; i < N; ++i) {
+        a4[i + 1] = a3[i];
+    }
+    print_array("插入 c 后", a4, N + 1);
 
     return 0;
 }
