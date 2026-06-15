@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小明运动过程</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f0f2f5; display: flex; justify-content: center;
+         padding: 40px 16px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  .wrap { background: #fff; border-radius: 8px; padding: 28px 32px;
+          width: 680px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  h1 { font-size: 18px; margin-bottom: 8px; }
+  .desc { font-size: 13px; color: #666; margin-bottom: 16px; }
+  canvas { display: block; border-radius: 6px; background: #f7f9fc;
+           border: 1px solid #dce3ed; margin-bottom: 12px; }
+  .info { font-size: 14px; color: #333; margin-bottom: 8px; min-height: 40px; }
+  .legend { display: flex; gap: 24px; font-size: 13px; color: #555; flex-wrap: wrap; }
+  .legend span { display: flex; align-items: center; gap: 6px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+  .btn-wrap { margin-top: 14px; display: flex; gap: 10px; }
+  button { padding: 8px 18px; border: none; border-radius: 6px; font-size: 14px;
+           cursor: pointer; color: #fff; }
+  .btn-go { background: #2563eb; }
+  .btn-go:hover { background: #1d4ed8; }
+  .btn-reset { background: #6b7280; }
+  .btn-reset:hover { background: #4b5563; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>小明从 A 到 B — 运动过程</h1>
+  <div class="desc">前半段时间 5 m/s &nbsp;|&nbsp; 后半段时间 3 m/s &nbsp;|&nbsp; 总路程 240 m &nbsp;|&nbsp; 总时间 60 s</div>
+  <canvas id="c" width="616" height="160"></canvas>
+  <div class="info" id="info"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:#2563eb"></span> 前半段 5 m/s（150 m, 30 s）</span>
+    <span><span class="dot" style="background:#059669"></span> 后半段 3 m/s（90 m, 30 s）</span>
+    <span><span class="dot" style="background:#dc2626"></span> 120 m 分界</span>
+  </div>
+  <div class="btn-wrap">
+    <button class="btn-go" id="btnGo">▶ 播放</button>
+    <button class="btn-reset" id="btnReset">重置</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const totalTime = 60, totalDist = 240;
+const firstDist = 150, firstTime = 30, secondDist = 90, secondTime = 30;
+const firstSpeed = 5, secondSpeed = 3;
+
+// Layout
+const marginL = 60, marginR = 40, trackY = 110;
+const trackLen = W - marginL - marginR;
+const scale = trackLen / totalDist;
+function distToX(d) { return marginL + d * scale; }
+
+let timer = null;
+let simT = 0;       // simulated time (0–60s)
+let curDist = 0;    // current distance in meters
+
+function currentSpeed() { return simT <= firstTime ? firstSpeed : secondSpeed; }
+
+function drawFrame() {
+  ctx.clearRect(0, 0, W, H);
+
+  const x0 = marginL, x1 = marginL + trackLen;
+  const xMid = distToX(firstDist);  // 150m = speed change point
+  const x120 = distToX(120);        // 120m mark
+  const curX = distToX(Math.min(totalDist, curDist));
+
+  // ---- Speed zone backgrounds ----
+  ctx.fillStyle = 'rgba(37,99,235,0.06)';
+  ctx.fillRect(x0, trackY - 26, xMid - x0, 52);
+  ctx.fillStyle = 'rgba(5,150,105,0.06)';
+  ctx.fillRect(xMid, trackY - 26, x1 - xMid, 52);
+
+  // ---- Track ----
+  ctx.strokeStyle = '#d1d5db';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x0, trackY); ctx.lineTo(x1, trackY); ctx.stroke();
+
+  // ---- Progress track (thick colored) ----
+  const firstPt = Math.min(curX, xMid);
+  if (curDist > 0) {
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(x0, trackY); ctx.lineTo(firstPt, trackY); ctx.stroke();
+  }
+  if (curX > xMid) {
+    ctx.strokeStyle = '#059669';
+    ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(xMid, trackY); ctx.lineTo(curX, trackY); ctx.stroke();
+  }
+
+  // ---- 120m marker (red dashed) ----
+  ctx.strokeStyle = '#dc2626';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(x120, trackY - 30); ctx.lineTo(x120, trackY + 30); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#dc2626';
+  ctx.font = '11px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('120 m', x120, trackY - 34);
+
+  // ---- Speed change line ----
+  ctx.strokeStyle = '#94a3b8';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath(); ctx.moveTo(xMid, trackY - 24); ctx.lineTo(xMid, trackY + 24); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#64748b';
+  ctx.font = '10px -apple-system, sans-serif';
+  ctx.fillText('150 m', xMid - 18, trackY + 34);
+  ctx.fillText('变', xMid, trackY + 34);
+
+  // ---- End labels ----
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 13px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('A', x0, trackY - 20);
+  ctx.fillText('B', x1, trackY - 20);
+
+  // ---- Distance ticks ----
+  for (const d of [0, 50, 100, 150, 200, 240]) {
+    const dx = distToX(d);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(dx, trackY - 6); ctx.lineTo(dx, trackY + 6); ctx.stroke();
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '10px -apple-system, sans-serif';
+    ctx.fillText(d + 'm', dx, trackY + 19);
+  }
+
+  // ---- Person ----
+  const px = Math.max(marginL - 5, Math.min(marginL + trackLen + 5, curX));
+  const spd = currentSpeed();
+  // Head
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(px, trackY - 20, 7, 0, Math.PI * 2);
+  ctx.fill();
+  // Body
+  ctx.fillStyle = spd === firstSpeed ? '#2563eb' : '#059669';
+  ctx.fillRect(px - 4, trackY - 13, 8, 14);
+  // Legs — speed proportional to current speed
+  const legFreq = spd * 1.6;  // 5 m/s -> freq 8, 3 m/s -> freq 4.8
+  const legAmp = spd * 0.7;  // more stride at higher speed
+  const phase = simT * legFreq;
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(px - 2, trackY + 1);
+  ctx.lineTo(px - 4 + Math.sin(phase) * legAmp, trackY + 11);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(px + 2, trackY + 1);
+  ctx.lineTo(px + 4 + Math.sin(phase + Math.PI) * legAmp, trackY + 11);
+  ctx.stroke();
+
+  // ---- Speed badge above person ----
+  const badgeColor = spd === firstSpeed ? '#2563eb' : '#059669';
+  ctx.fillStyle = badgeColor;
+  ctx.font = 'bold 11px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  const badgeText = spd + ' m/s';
+  const badgeW = ctx.measureText(badgeText).width + 12;
+  const badgeH = 16;
+  const badgeX = px - badgeW / 2;
+  const badgeY = trackY - 42;
+  ctx.beginPath();
+  ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillText(badgeText, px, badgeY + 12);
+
+  // ---- Info panel ----
+  const info = document.getElementById('info');
+  const zone = curDist <= 120 ? '前半120米（5 m/s 段）' : '后半120米';
+  const zoneColor = curDist <= 120 ? '#2563eb' : '#059669';
+  info.innerHTML =
+    `已走: <b>${curDist.toFixed(1)} m</b> &nbsp;|&nbsp;` +
+    `耗时: <b>${simT.toFixed(1)} s</b> &nbsp;|&nbsp;` +
+    `当前速度: <b style="color:${zoneColor}">${spd} m/s</b> &nbsp;|&nbsp;` +
+    `所在区域: <b style="color:${zoneColor}">${zone}</b>`;
+}
+
+function tick() {
+  // Run animation in real-time: 1 simulated second = 1 real second
+  // but speed it up 4x so 60s plays in 15 real seconds
+  const realDt = 1 / 30; // ~33ms per frame at 30fps
+  const simDt = realDt * 3;  // 4x speed
+
+  simT += simDt;
+  if (simT > totalTime) simT = totalTime;
+
+  // Calculate distance based on speed zones
+  if (simT <= firstTime) {
+    curDist = firstSpeed * simT;
+  } else {
+    curDist = firstDist + secondSpeed * (simT - firstTime);
+  }
+
+  drawFrame();
+
+  if (simT >= totalTime) {
+    clearInterval(timer);
+    timer = null;
+    const info = document.getElementById('info');
+    info.innerHTML +=
+      ' &nbsp;|&nbsp; <b style="color:#dc2626">前120米: 24 s &nbsp; 后120米: 36 s</b>';
+  }
+}
+
+function startAnim() {
+  if (timer) return;
+  simT = 0;
+  curDist = 0;
+  drawFrame();
+  timer = setInterval(tick, 33);
+}
+
+function reset() {
+  if (timer) { clearInterval(timer); timer = null; }
+  simT = 0;
+  curDist = 0;
+  drawFrame();
+  document.getElementById('info').innerHTML = '';
+}
+
+document.getElementById('btnGo').onclick = startAnim;
+document.getElementById('btnReset').onclick = reset;
+
+drawFrame();
+</script>
+</body>
+</html>

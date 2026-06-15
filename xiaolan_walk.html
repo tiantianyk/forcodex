@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小蓝运动 — 比较法</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f0f2f5; display: flex; justify-content: center;
+         padding: 40px 16px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  .wrap { background: #fff; border-radius: 8px; padding: 28px 32px;
+          width: 700px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #666; margin-bottom: 14px; }
+  canvas { display: block; border-radius: 6px; background: #f7f9fc;
+           border: 1px solid #dce3ed; margin-bottom: 8px; }
+  .info { font-size: 14px; color: #333; margin-bottom: 8px; min-height: 48px;
+          line-height: 1.6; }
+  .btn-wrap { display: flex; gap: 10px; }
+  button { padding: 8px 18px; border: none; border-radius: 6px; font-size: 14px;
+           cursor: pointer; color: #fff; }
+  .btn-go { background: #2563eb; } .btn-go:hover { background: #1d4ed8; }
+  .btn-reset { background: #6b7280; } .btn-reset:hover { background: #4b5563; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>小蓝从 A 到 B — 比较法（不用方程）</h1>
+  <div class="subtitle">上半段 30 min 原速 &nbsp;|&nbsp; 下半段 20 min 提速 +50 &nbsp;|&nbsp; 剩 2000 m &nbsp;→&nbsp; 原速 <b>300 m/min</b> &nbsp; 总距 <b>18 km</b></div>
+  <canvas id="c" width="636" height="280"></canvas>
+  <div class="info" id="info"></div>
+  <div class="btn-wrap">
+    <button class="btn-go" id="btnGo">▶ 播放</button>
+    <button class="btn-reset" id="btnReset">重置</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+const halfDist = 9000;
+const baseSpeed = 300, boostTime = 20, remainingDist = 2000;
+const boostExtra = 50 * boostTime; // 1000 m
+const needTime = (boostExtra + remainingDist) / baseSpeed; // 10 min
+
+// Person animation
+let simT = 0;
+let timer = null, timerRunning = false;
+let curPhase = 0, startTime = 0;
+
+// Layout: mountain-like terrain
+const groundY = 230;
+const leftX = 40, rightX = W - 40;
+const pathLen = rightX - leftX;
+const scale = pathLen / (halfDist * 2); // full distance = 18000m
+
+function pathX(dist) { return leftX + dist * scale; }
+function pathY(dist) {
+  // Terrain: slight hill in the middle
+  const total = halfDist * 2;
+  const frac = dist / total;
+  // Peak at 60% of the way
+  const hill = Math.sin(frac * Math.PI * 1.2) * 30;
+  return groundY - hill;
+}
+
+function drawTerrain() {
+  // Ground
+  ctx.fillStyle = '#e8edf2';
+  ctx.beginPath();
+  ctx.moveTo(leftX - 20, groundY + 40);
+  for (let d = 0; d <= halfDist * 2; d += 100) {
+    ctx.lineTo(pathX(d), pathY(d));
+  }
+  ctx.lineTo(rightX + 20, groundY + 40);
+  ctx.closePath();
+  ctx.fill();
+
+  // Path line
+  ctx.strokeStyle = '#94a3b8';
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.moveTo(pathX(0), pathY(0));
+  for (let d = 100; d <= halfDist * 2; d += 100) {
+    ctx.lineTo(pathX(d), pathY(d));
+  }
+  ctx.stroke();
+
+  // Halfway mark
+  const hx = pathX(halfDist), hy = pathY(halfDist);
+  ctx.strokeStyle = '#64748b';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(hx, hy - 30); ctx.lineTo(hx, hy + 35); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#64748b';
+  ctx.font = 'bold 11px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('中点 9000 m', hx, hy - 34);
+
+  // Speed zone labels
+  ctx.fillStyle = '#2563eb';
+  ctx.font = 'italic bold 12px -apple-system, sans-serif';
+  const zone1x = (leftX + hx) / 2;
+  ctx.fillText('上半段 原速', zone1x - 20, groundY - 50);
+
+  ctx.fillStyle = '#7c3aed';
+  ctx.font = 'italic bold 12px -apple-system, sans-serif';
+  ctx.fillText('下半段 提速+50', (hx + rightX) / 2 + 10, groundY - 50);
+
+  // A and B labels
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 14px -apple-system, sans-serif';
+  ctx.fillText('A', leftX - 14, groundY + 22);
+  ctx.fillText('B', rightX + 14, groundY + 22);
+
+  // Small house icons
+  ctx.fillStyle = '#2563eb';
+  ctx.fillRect(leftX - 8, groundY - 8, 16, 12);
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.moveTo(leftX - 10, groundY - 8);
+  ctx.lineTo(leftX, groundY - 18);
+  ctx.lineTo(leftX + 10, groundY - 8);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#f59e0b';
+  ctx.fillRect(rightX - 8, groundY - 8, 16, 12);
+  ctx.fillStyle = '#dc2626';
+  ctx.beginPath();
+  ctx.moveTo(rightX - 10, groundY - 8);
+  ctx.lineTo(rightX, groundY - 18);
+  ctx.lineTo(rightX + 10, groundY - 8);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = '9px -apple-system, sans-serif';
+  ctx.fillText('邮局', rightX - 6, groundY + 3);
+}
+
+function drawPerson(dist) {
+  const px = pathX(dist);
+  const py = pathY(dist) - 22;
+  const speed = dist <= halfDist ? baseSpeed : baseSpeed + 50;
+  const zoneColor = dist <= halfDist ? '#2563eb' : '#7c3aed';
+
+  // Head
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(px, py, 7, 0, Math.PI * 2);
+  ctx.fill();
+  // Body
+  ctx.fillStyle = zoneColor;
+  ctx.fillRect(px - 4, py + 7, 8, 13);
+  // Legs
+  const legFreq = speed / 60;
+  const legAmp = 3;
+  const phase = simT * legFreq;
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(px - 2, py + 20);
+  ctx.lineTo(px - 4 + Math.sin(phase) * legAmp, py + 29);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(px + 2, py + 20);
+  ctx.lineTo(px + 4 + Math.sin(phase + Math.PI) * legAmp, py + 29);
+  ctx.stroke();
+
+  // Speed badge
+  const spdText = speed + ' m/min';
+  ctx.font = 'bold 10px -apple-system, sans-serif';
+  const bw = ctx.measureText(spdText).width + 10;
+  ctx.fillStyle = zoneColor;
+  ctx.beginPath();
+  ctx.roundRect(px - bw / 2, py - 18, bw, 15, 4);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.fillText(spdText, px, py - 6);
+}
+
+// Comparison bars
+const barY = 30, barH = 22;
+const barLeft = leftX;
+const barLen = pathLen / 2; // only half (9000m)
+const barScale = barLen / halfDist;
+
+function drawBars(phase) {
+  const bx0 = barLeft;
+
+  if (phase >= 1) {
+    // Upper bar
+    ctx.fillStyle = '#2563eb';
+    ctx.beginPath();
+    ctx.roundRect(bx0, barY, barLen, barH, 4);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('上半段：30 分钟（原速）', bx0 + barLen / 2, barY + barH / 2 + 4);
+
+    if (phase >= 2) {
+      const blueW = baseSpeed * boostTime * barScale;
+      ctx.fillStyle = '#2563eb';
+      ctx.beginPath();
+      ctx.roundRect(bx0, barY + barH + 8, blueW, barH, 4);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 11px -apple-system, sans-serif';
+      ctx.fillText('下半段前 20 分钟（原速）', bx0 + blueW / 2, barY + barH + 8 + barH / 2 + 4);
+
+      if (phase >= 3) {
+        const boostW = boostExtra * barScale;
+        ctx.fillStyle = '#7c3aed';
+        ctx.beginPath();
+        ctx.roundRect(bx0 + blueW, barY + barH + 8, boostW, barH, 4);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 10px -apple-system, sans-serif';
+        ctx.fillText('多走', bx0 + blueW + boostW / 2, barY + barH + 8 + barH / 2 + 4);
+        ctx.fillStyle = '#555';
+        ctx.font = '10px -apple-system, sans-serif';
+        ctx.fillText('20×50=1000m', bx0 + blueW + boostW / 2, barY + barH + 8 + barH + 14);
+
+        if (phase >= 4) {
+          const remainW = remainingDist * barScale;
+          ctx.fillStyle = '#f59e0b';
+          ctx.beginPath();
+          ctx.roundRect(bx0 + blueW + boostW, barY + barH + 8, remainW, barH, 4);
+          ctx.fill();
+          ctx.fillStyle = '#333';
+          ctx.font = 'bold 10px -apple-system, sans-serif';
+          ctx.fillText('剩', bx0 + blueW + boostW + remainW / 2, barY + barH + 8 + barH / 2 + 4);
+          ctx.fillStyle = '#555';
+          ctx.font = '10px -apple-system, sans-serif';
+          ctx.fillText('2000m', bx0 + blueW + boostW + remainW / 2, barY + barH + 8 + barH + 14);
+
+          if (phase >= 5) {
+            const bY = barY + barH * 2 + 20;
+            ctx.strokeStyle = '#dc2626';
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash([]);
+            const x1 = bx0 + blueW, x2 = bx0 + barLen;
+            ctx.beginPath(); ctx.moveTo(x1, bY - 6); ctx.lineTo(x1, bY + 18); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x2, bY - 6); ctx.lineTo(x2, bY + 18); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x1, bY + 18); ctx.lineTo(x2, bY + 18); ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x1, bY + 15); ctx.lineTo(x1 + 7, bY + 18); ctx.lineTo(x1, bY + 21); ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x2, bY + 15); ctx.lineTo(x2 - 7, bY + 18); ctx.lineTo(x2, bY + 21); ctx.stroke();
+            ctx.fillStyle = '#dc2626';
+            ctx.font = 'bold 12px -apple-system, sans-serif';
+            ctx.fillText('按原速还需 10 分钟（1000+2000=3000m）', (x1 + x2) / 2, bY + 34);
+          }
+        }
+      }
+    }
+  }
+
+  // Row labels
+  if (phase >= 2) {
+    ctx.fillStyle = '#555';
+    ctx.font = '11px -apple-system, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('上半段', barLeft - 6, barY + barH / 2 + 4);
+    ctx.fillText('下半段', barLeft - 6, barY + barH + 8 + barH / 2 + 4);
+  }
+}
+
+function drawProgress(t) {
+  const barX = 30, barProgY = H - 24, barW = W - 60, barH = 12;
+  ctx.strokeStyle = '#d1d5db';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(barX, barProgY, barW, barH, 3);
+  ctx.stroke();
+
+  const totalTime = 50 + needTime; // 50 + 10 = 60 min
+  const segs = [
+    { w: 30 / totalTime * barW, color: '#2563eb' },
+    { w: 20 / totalTime * barW, color: '#7c3aed' },
+    { w: needTime / totalTime * barW, color: '#f59e0b' },
+  ];
+  let sx = barX;
+  for (const s of segs) {
+    ctx.fillStyle = s.color;
+    ctx.beginPath();
+    ctx.roundRect(sx, barProgY, s.w, barH, 2);
+    ctx.fill();
+    sx += s.w;
+  }
+
+  const prog = t / totalTime;
+  const mx = barX + prog * barW;
+  ctx.fillStyle = '#333';
+  ctx.beginPath();
+  ctx.moveTo(mx, barProgY - 4);
+  ctx.lineTo(mx - 3, barProgY - 9);
+  ctx.lineTo(mx + 3, barProgY - 9);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 10px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(t.toFixed(1) + ' min', mx, barProgY - 11);
+}
+
+function drawFrame(phase) {
+  ctx.clearRect(0, 0, W, H);
+  drawTerrain();
+  drawBars(phase);
+
+  // Draw person at appropriate position
+  if (phase >= 1 && simT > 0) {
+    let dist = 0;
+    if (simT <= 30) {
+      dist = baseSpeed * simT;
+    } else if (simT <= 50) {
+      dist = halfDist + (baseSpeed + 50) * (simT - 30);
+    } else {
+      dist = halfDist + (baseSpeed + 50) * 20 + (baseSpeed + 50) * (simT - 50);
+      dist = Math.min(halfDist * 2, dist);
+    }
+    drawPerson(dist);
+  }
+  drawProgress(simT);
+}
+
+function updateInfo(p) {
+  const info = document.getElementById('info');
+  const steps = [
+    '',
+    '第1步：上半段按原速走 30 分钟 → 一半路程',
+    '第2步：下半段前 20 分钟，也先按原速算',
+    '第3步：实际提速了，每分钟多 50 m → 20 分钟多走 50×20=1000 m',
+    '第4步：还剩 2000 m 没走完',
+    '第5步：多走的1000m + 剩的2000m = 3000m → <b style="color:#dc2626">按原速还需 10 分钟</b><br>所以：<b style="color:#dc2626">10 分钟走 3000 m → 原速 = 300 m/min</b>',
+    '<b style="color:#059669">答案：原速 300 m/min，总距 18000 m（18 km），后半段 350 m/min</b>'
+  ];
+  info.innerHTML = steps[Math.min(p, 6)] || '';
+}
+
+const phaseDurations = [400, 1200, 1000, 1000, 1000, 2000, 1500];
+
+function animFrame(ts) {
+  if (!timerRunning) return;
+  if (startTime === 0) startTime = ts;
+  const elapsed = ts - startTime;
+  let acc = 0;
+  for (let p = 1; p < phaseDurations.length; p++) {
+    acc += phaseDurations[p];
+    if (elapsed >= acc && p > curPhase) {
+      curPhase = p;
+      drawFrame(curPhase);
+      updateInfo(curPhase);
+    }
+  }
+
+  // Animate person: map to an elapsed time
+  const totalAnim = phaseDurations.slice(1).reduce((a, b) => a + b, 0);
+  // Skip first phase (just drawing bars) for person movement
+  const personDelay = phaseDurations[1]; // person starts moving after phase 1
+  if (elapsed > personDelay) {
+    const personElapsed = Math.min(elapsed - personDelay, totalAnim - personDelay);
+    const totalSimTime = 60; // 60 min
+    simT = (personElapsed / (totalAnim - personDelay)) * totalSimTime;
+  } else {
+    simT = 0;
+  }
+
+  if (elapsed >= acc) {
+    timerRunning = false;
+    cancelAnimationFrame(timer);
+    timer = null;
+    return;
+  }
+  timer = requestAnimationFrame(animFrame);
+}
+
+function startAnim() {
+  if (timerRunning) return;
+  curPhase = 0; startTime = 0; simT = 0;
+  drawFrame(0); updateInfo(0);
+  timerRunning = true;
+  curPhase = 1;
+  drawFrame(curPhase); updateInfo(curPhase);
+  timer = requestAnimationFrame(animFrame);
+}
+
+function reset() {
+  timerRunning = false;
+  if (timer) { cancelAnimationFrame(timer); timer = null; }
+  curPhase = 0; startTime = 0; simT = 0;
+  drawFrame(0); updateInfo(0);
+}
+
+document.getElementById('btnGo').onclick = startAnim;
+document.getElementById('btnReset').onclick = reset;
+drawFrame(0);
+updateInfo(0);
+</script>
+</body>
+</html>

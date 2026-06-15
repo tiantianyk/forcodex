@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>二分查找工具</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: #f0f2f5; display: flex; justify-content: center;
+         padding: 40px 16px; min-height: 100vh; }
+  .card { background: #fff; border-radius: 8px; padding: 28px 32px;
+          width: 520px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  h1 { font-size: 18px; color: #1a1a1a; margin-bottom: 20px; }
+  .label { font-size: 13px; color: #666; margin-bottom: 6px; }
+  .sorted { background: #f7f9fc; border: 1px solid #dce3ed; border-radius: 6px;
+            padding: 14px 16px; font-size: 14px; color: #333; margin-bottom: 24px;
+            word-break: break-all; line-height: 1.6; }
+  .row { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; }
+  .row input { flex: 1; padding: 8px 12px; border: 1px solid #d1d5db;
+               border-radius: 6px; font-size: 14px; outline: none; }
+  .row input:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37,99,235,.15); }
+  .row button { padding: 8px 20px; border: none; border-radius: 6px;
+                background: #2563eb; color: #fff; font-size: 14px; cursor: pointer; }
+  .row button:hover { background: #1d4ed8; }
+  .btn-add { background: #059669; }
+  .btn-add:hover { background: #047857; }
+  .result { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+            padding: 14px 16px; font-size: 14px; color: #333; min-height: 44px; }
+  .found { color: #059669; }
+  .not-found { color: #dc2626; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>二分查找 — 快速排序后查询</h1>
+
+  <div class="label">排序结果（快速排序）</div>
+  <div class="sorted" id="sortedArray"></div>
+
+  <div class="row">
+    <input type="number" id="addInput" placeholder="输入要添加的数字">
+    <button onclick="doAdd()" class="btn-add">添加</button>
+  </div>
+
+  <div class="row">
+    <input type="number" id="searchInput" placeholder="输入要查询的数字" autofocus>
+    <button onclick="doSearch()">查询</button>
+  </div>
+
+  <div class="result" id="result"></div>
+</div>
+
+<script>
+  const data = [42, 7, 19, 88, 3, 66, 25, 91, 14, 53, 31, 77];
+
+  function quickSort(arr, low, high) {
+    if (low >= high) return;
+    const pivot = arr[high];
+    let i = low;
+    for (let j = low; j < high; j++) {
+      if (arr[j] < pivot) {
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+        i++;
+      }
+    }
+    [arr[i], arr[high]] = [arr[high], arr[i]];
+    quickSort(arr, low, i - 1);
+    quickSort(arr, i + 1, high);
+  }
+
+  function binarySearch(arr, target) {
+    let left = 0, right = arr.length - 1;
+    while (left <= right) {
+      const mid = left + Math.floor((right - left) / 2);
+      if (arr[mid] === target) return mid;
+      else if (arr[mid] < target) left = mid + 1;
+      else right = mid - 1;
+    }
+    return -1;
+  }
+
+  const sorted = [...data];
+  quickSort(sorted, 0, sorted.length - 1);
+  document.getElementById('sortedArray').textContent = sorted.join(', ');
+
+  document.getElementById('addInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doAdd();
+  });
+
+  document.getElementById('searchInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+  });
+
+  function doAdd() {
+    const input = document.getElementById('addInput');
+    const val = parseInt(input.value);
+    if (isNaN(val)) return;
+    sorted.push(val);
+    quickSort(sorted, 0, sorted.length - 1);
+    document.getElementById('sortedArray').textContent = sorted.join(', ');
+    document.getElementById('result').textContent = '';
+    input.value = '';
+  }
+
+  function doSearch() {
+    const input = document.getElementById('searchInput');
+    const result = document.getElementById('result');
+    const val = parseInt(input.value);
+
+    if (isNaN(val)) {
+      result.innerHTML = '<span class="not-found">请输入有效的数字</span>';
+      return;
+    }
+
+    const pos = binarySearch(sorted, val);
+    if (pos !== -1) {
+      result.innerHTML = `<span class="found">✓ 找到 ${val}，位于排序后数组的第 ${pos} 位（下标 ${pos}）</span>`;
+    } else {
+      result.innerHTML = `<span class="not-found">✗ 未找到 ${val}，该数字不在数组中</span>`;
+    }
+  }
+</script>
+</body>
+</html>

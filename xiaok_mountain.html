@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>小k翻山去邮局</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f0f2f5; display: flex; justify-content: center;
+         padding: 40px 16px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  .wrap { background: #fff; border-radius: 8px; padding: 28px 32px;
+          width: 700px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #666; margin-bottom: 14px; }
+  canvas { display: block; border-radius: 6px; background: #f7f9fc;
+           border: 1px solid #dce3ed; margin-bottom: 8px; }
+  .info { font-size: 14px; color: #333; margin-bottom: 8px; min-height: 48px;
+          line-height: 1.6; }
+  .btn-wrap { display: flex; gap: 10px; }
+  button { padding: 8px 18px; border: none; border-radius: 6px; font-size: 14px;
+           cursor: pointer; color: #fff; }
+  .btn-go { background: #2563eb; } .btn-go:hover { background: #1d4ed8; }
+  .btn-reset { background: #6b7280; } .btn-reset:hover { background: #4b5563; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>小k 翻山去邮局 — 往返 + 休息</h1>
+  <div class="subtitle">家 → 上坡12km(4km/h) → 下坡8km(5km/h) → 邮局(休息1h) → 回程对调 &nbsp;|&nbsp; <b>总计 10 h</b></div>
+  <canvas id="c" width="636" height="280"></canvas>
+  <div class="info" id="info"></div>
+  <div class="btn-wrap">
+    <button class="btn-go" id="btnGo">▶ 播放</button>
+    <button class="btn-reset" id="btnReset">重置</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+// Data
+const uphillDist = 12, downhillDist = 8;
+const uphillSpeed = 4, downhillSpeed = 5;
+const goUpTime = uphillDist / uphillSpeed;     // 3 h
+const goDownTime = downhillDist / downhillSpeed; // 1.6 h
+const restTime = 1;
+const backUpTime = downhillDist / uphillSpeed;   // 2 h
+const backDownTime = uphillDist / downhillSpeed; // 2.4 h
+const totalTime = goUpTime + goDownTime + restTime + backUpTime + backDownTime; // 10 h
+
+// Layout: mountain profile
+const groundY = 210;
+const peakX = W / 2, peakY = 70;
+const homeX = 60, postX = W - 60;
+const homeY = groundY, postY = groundY;
+
+// Person position
+let simT = 0;       // simulated hours (0–10)
+let timer = null, timerRunning = false;
+let curPhase = 0, startTime = 0;
+
+function drawMountain() {
+  // Mountain silhouette
+  ctx.fillStyle = '#e8edf2';
+  ctx.beginPath();
+  ctx.moveTo(homeX, groundY);
+  ctx.lineTo(peakX, peakY);
+  ctx.lineTo(postX, groundY);
+  ctx.lineTo(homeX, groundY);
+  ctx.fill();
+
+  // Mountain outline
+  ctx.strokeStyle = '#94a3b8';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(homeX, groundY);
+  ctx.lineTo(peakX, peakY);
+  ctx.lineTo(postX, groundY);
+  ctx.stroke();
+
+  // Up/down labels on the mountain
+  ctx.fillStyle = '#dc2626';
+  ctx.font = 'bold 12px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  const midUpX = (homeX + peakX) / 2, midUpY = (groundY + peakY) / 2;
+  ctx.fillText('上坡 12 km', midUpX - 30, midUpY);
+  ctx.fillText('4 km/h', midUpX - 30, midUpY + 16);
+
+  ctx.fillStyle = '#059669';
+  const midDownX = (peakX + postX) / 2, midDownY = (peakY + groundY) / 2;
+  ctx.fillText('下坡 8 km', midDownX + 30, midDownY);
+  ctx.fillText('5 km/h', midDownX + 30, midDownY + 16);
+
+  // Return path labels (on the way back, uphill and downhill swap)
+  ctx.fillStyle = '#dc2626';
+  ctx.font = 'italic 11px -apple-system, sans-serif';
+  ctx.fillText('回程：这段变上坡 8 km(4km/h)', (peakX + postX) / 2, groundY + 22);
+  ctx.fillStyle = '#059669';
+  ctx.fillText('回程：这段变下坡 12 km(5km/h)', (homeX + peakX) / 2, groundY + 22);
+
+  // Home
+  ctx.fillStyle = '#2563eb';
+  ctx.beginPath();
+  ctx.arc(homeX, groundY + 5, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 10px -apple-system, sans-serif';
+  ctx.fillText('家', homeX, groundY + 9);
+
+  // Post office
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(postX, groundY + 5, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 10px -apple-system, sans-serif';
+  ctx.fillText('邮', postX, groundY + 9);
+}
+
+function getPersonPos(t) {
+  // t in hours, 0 at start, total 10h
+  // Phase breakdown:
+  // 0–3h:    going uphill (home → peak)
+  // 3–4.6h:  going downhill (peak → post)
+  // 4.6–5.6h: resting at post office
+  // 5.6–7.6h: returning uphill (post → peak) — 2h
+  // 7.6–10h:  returning downhill (peak → home) — 2.4h
+
+  if (t <= 0) return { x: homeX, y: groundY, moving: false, atPost: false, atHome: true, goingUp: false, goingDown: false, backUp: false, backDown: false, speed: 0 };
+  if (t <= goUpTime) {
+    const frac = t / goUpTime;
+    return { x: homeX + (peakX - homeX) * frac, y: groundY - (groundY - peakY) * frac, moving: true, atPost: false, atHome: false, goingUp: true, goingDown: false, backUp: false, backDown: false, speed: uphillSpeed };
+  }
+  if (t <= goUpTime + goDownTime) {
+    const frac = (t - goUpTime) / goDownTime;
+    return { x: peakX + (postX - peakX) * frac, y: peakY + (groundY - peakY) * frac, moving: true, atPost: false, atHome: false, goingUp: false, goingDown: true, backUp: false, backDown: false, speed: downhillSpeed };
+  }
+  if (t <= goUpTime + goDownTime + restTime) {
+    return { x: postX, y: groundY, moving: false, atPost: true, atHome: false, goingUp: false, goingDown: false, backUp: false, backDown: false, speed: 0 };
+  }
+  if (t <= goUpTime + goDownTime + restTime + backUpTime) {
+    const frac = (t - goUpTime - goDownTime - restTime) / backUpTime;
+    return { x: postX - (postX - peakX) * frac, y: groundY - (groundY - peakY) * frac, moving: true, atPost: false, atHome: false, goingUp: false, goingDown: false, backUp: true, backDown: false, speed: uphillSpeed };
+  }
+  const frac = Math.min(1, (t - goUpTime - goDownTime - restTime - backUpTime) / backDownTime);
+  return { x: peakX - (peakX - homeX) * frac, y: peakY + (groundY - peakY) * frac, moving: true, atPost: false, atHome: false, goingUp: false, goingDown: false, backUp: false, backDown: true, speed: downhillSpeed };
+}
+
+function drawPerson(pos) {
+  const { x, y, atHome, atPost, speed } = pos;
+  if (atHome || atPost) {
+    // Idle person
+    const py = y - 24;
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath();
+    ctx.arc(x, py, 7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2563eb';
+    ctx.fillRect(x - 4, py + 7, 8, 12);
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x - 2, py + 19); ctx.lineTo(x - 2, py + 28); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x + 2, py + 19); ctx.lineTo(x + 2, py + 28); ctx.stroke();
+
+    if (atPost) {
+      ctx.fillStyle = '#6b7280';
+      ctx.font = 'bold 11px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('休息 1h...', x, py - 30);
+    }
+    return;
+  }
+
+  // Walking person
+  const py = y - 24;
+  ctx.fillStyle = '#f59e0b';
+  ctx.beginPath();
+  ctx.arc(x, py, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = speed === uphillSpeed ? '#dc2626' : '#059669';
+  ctx.fillRect(x - 4, py + 7, 8, 12);
+  const legFreq = speed * 2;
+  const legAmp = speed * 0.6;
+  const phase = simT * legFreq;
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x - 2, py + 19);
+  ctx.lineTo(x - 4 + Math.sin(phase) * legAmp, py + 28);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x + 2, py + 19);
+  ctx.lineTo(x + 4 + Math.sin(phase + Math.PI) * legAmp, py + 28);
+  ctx.stroke();
+
+  // Speed badge
+  const spdText = speed + ' km/h';
+  ctx.font = 'bold 10px -apple-system, sans-serif';
+  const bw = ctx.measureText(spdText).width + 10;
+  ctx.fillStyle = speed === uphillSpeed ? '#dc2626' : '#059669';
+  ctx.beginPath();
+  ctx.roundRect(x - bw / 2, py - 18, bw, 14, 3);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.fillText(spdText, x, py - 7);
+}
+
+function drawProgressBar(t) {
+  const barX = 30, barY = H - 30, barW = W - 60, barH = 16;
+  ctx.strokeStyle = '#d1d5db';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(barX, barY, barW, barH, 4);
+  ctx.stroke();
+
+  // Segments
+  const segments = [
+    { w: goUpTime / totalTime * barW, color: "#dc2626", label: "去上坡", sub: "12km" },
+    { w: goDownTime / totalTime * barW, color: "#059669", label: "去下坡", sub: "8km" },
+    { w: restTime / totalTime * barW, color: "#94a3b8", label: "休息", sub: "1h" },
+    { w: backUpTime / totalTime * barW, color: "#dc2626", label: "回上坡", sub: "8km" },
+    { w: backDownTime / totalTime * barW, color: "#059669", label: "回下坡", sub: "12km" },
+  ];
+  let sx = barX;
+  let accT = 0;
+  for (const seg of segments) {
+    ctx.fillStyle = seg.color;
+    ctx.beginPath();
+    ctx.roundRect(sx, barY, seg.w, barH, seg.w > 4 ? 2 : 0);
+    ctx.fill();
+    if (seg.w > 25) {
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 9px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(seg.label, sx + seg.w / 2, barY + barH / 2 + 3);
+      if (seg.sub) {
+        ctx.font = 'bold 8px -apple-system, sans-serif';
+        ctx.fillStyle = '#555';
+        ctx.fillText(seg.sub, sx + seg.w / 2, barY + barH / 2 + 14);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px -apple-system, sans-serif';
+      }
+    }
+    sx += seg.w;
+    accT += seg.w / barW * totalTime;
+  }
+
+  // Progress indicator
+  const progress = t / totalTime;
+  const markerX = barX + progress * barW;
+  ctx.fillStyle = '#333';
+  ctx.beginPath();
+  ctx.moveTo(markerX, barY - 5);
+  ctx.lineTo(markerX - 3, barY - 10);
+  ctx.lineTo(markerX + 3, barY - 10);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = '#333';
+  ctx.font = 'bold 11px -apple-system, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(t.toFixed(1) + ' h', markerX, barY - 12);
+}
+
+function formatPhase(t) {
+  if (t <= 0) return '准备出发';
+  if (t <= goUpTime) return `去程上坡 ${t.toFixed(1)}h / 3h（${uphillSpeed} km/h）`;
+  if (t <= goUpTime + goDownTime) return `去程下坡 ${(t - goUpTime).toFixed(1)}h / 1.6h（${downhillSpeed} km/h）`;
+  if (t <= goUpTime + goDownTime + restTime) return `邮局休息 ${(t - goUpTime - goDownTime).toFixed(1)}h / 1h`;
+  if (t <= goUpTime + goDownTime + restTime + backUpTime)
+    return `回程上坡 ${(t - goUpTime - goDownTime - restTime).toFixed(1)}h / 2h（${uphillSpeed} km/h）`;
+  return `回程下坡 ${(t - goUpTime - goDownTime - restTime - backUpTime).toFixed(1)}h / 2.4h（${downhillSpeed} km/h）`;
+}
+
+function drawFrame() {
+  ctx.clearRect(0, 0, W, H);
+  drawMountain();
+  const pos = getPersonPos(simT);
+  drawPerson(pos);
+  drawProgressBar(simT);
+
+  document.getElementById('info').innerHTML =
+    `<b>${formatPhase(simT)}</b> &nbsp;|&nbsp; 累计 ${simT.toFixed(1)} h / ${totalTime} h`;
+}
+
+function tick(ts) {
+  if (!timerRunning) return;
+  if (startTime === 0) startTime = ts;
+  const elapsed = (ts - startTime) / 1000; // real seconds
+  simT = Math.min(totalTime, elapsed * 0.5); // 0.5x realtime → 20s total
+  drawFrame();
+  if (simT >= totalTime) {
+    timerRunning = false;
+    cancelAnimationFrame(timer);
+    timer = null;
+    document.getElementById('info').innerHTML +=
+      ' &nbsp;|&nbsp; <b style="color:#dc2626">总计：3+1.6+1+2+2.4 = 10 小时</b>';
+  } else {
+    timer = requestAnimationFrame(tick);
+  }
+}
+
+function startAnim() {
+  if (timerRunning) return;
+  simT = 0; startTime = 0;
+  drawFrame();
+  timerRunning = true;
+  timer = requestAnimationFrame(tick);
+}
+
+function reset() {
+  timerRunning = false;
+  if (timer) { cancelAnimationFrame(timer); timer = null; }
+  simT = 0; startTime = 0;
+  drawFrame();
+  document.getElementById('info').innerHTML = '';
+}
+
+document.getElementById('btnGo').onclick = startAnim;
+document.getElementById('btnReset').onclick = reset;
+drawFrame();
+</script>
+</body>
+</html>
