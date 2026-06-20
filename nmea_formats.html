@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NMEA RMC 码流实时生成</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#1a1a2e;display:flex;justify-content:center;padding:40px 16px;
+       font-family:'SF Mono','Menlo','Consolas',monospace;color:#e0e0e0}
+  .wrap{width:720px}
+  h1{font-size:16px;color:#fff;margin-bottom:4px}
+  .sub{font-size:12px;color:#888;margin-bottom:20px}
+  .item{background:#16213e;border:1px solid #0f3460;border-radius:6px;
+         padding:12px 16px;margin-bottom:8px}
+  .item .label{font-size:11px;color:#888;margin-bottom:3px}
+  .item .sentence{font-size:13px;color:#00e676;word-break:break-all;line-height:1.6}
+  .item .sentence .talker{color:#ff9100}
+  .item .sentence .time{color:#00e5ff}
+  .item .sentence .valid{color:#76ff03}
+  .item .sentence .coords{color:#b388ff}
+  .item .sentence .rest{color:#90a4ae}
+  .highlight{color:#ffeb3b}
+  .hex{font-size:11px;color:#546e7a;margin-top:3px;word-break:break-all}
+  .utc-clock{font-size:18px;color:#fff;margin-bottom:16px}
+  .utc-clock span{color:#00e5ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NMEA RMC 码流 — 实时 UTC 时间编码</h1>
+  <div class="sub">模拟位置：上海 (31.2304°N 121.4737°E)  |  自动刷新</div>
+
+  <div class="utc-clock">UTC: <span id="utcClock">--</span></div>
+
+  <div id="output"></div>
+</div>
+
+<script>
+function pad(n,w){return String(n).padStart(w,'0')}
+
+function nmeaChecksum(sentence){
+  // sentence without $ and *
+  let cs = 0;
+  for(let i=0; i<sentence.length; i++) cs ^= sentence.charCodeAt(i);
+  return pad(cs.toString(16).toUpperCase(), 2);
+}
+
+function latDMM(deg){
+  const d = Math.floor(Math.abs(deg));
+  const m = (Math.abs(deg) - d) * 60;
+  return pad(d,2) + pad(m.toFixed(4),7);
+}
+
+function lonDMM(deg){
+  const d = Math.floor(Math.abs(deg));
+  const m = (Math.abs(deg) - d) * 60;
+  return pad(d,3) + pad(m.toFixed(4),7);
+}
+
+function buildRMC(talker, utc, lat, lon, speed, cog, dateParts, mode){
+  const timeStr = pad(utc.getUTCHours(),2) + pad(utc.getUTCMinutes(),2) + pad(utc.getUTCSeconds(),2) + '.00';
+  const latStr = latDMM(lat);
+  const latDir = lat >= 0 ? 'N' : 'S';
+  const lonStr = lonDMM(lon);
+  const lonDir = lon >= 0 ? 'E' : 'W';
+  const dateStr = pad(dateParts[0],2) + pad(dateParts[1],2) + pad(dateParts[2] % 100, 2);
+  const spd = speed.toFixed(1);
+  const c = cog.toFixed(1);
+
+  const body = `${timeStr},A,${latStr},${latDir},${lonStr},${lonDir},${spd},${c},${dateStr},,,${mode}`;
+  const cs = nmeaChecksum(talker + 'RMC,' + body);
+  return {talker, body, cs, sentence: '$' + talker + 'RMC,' + body + '*' + cs};
+}
+
+function colorSentence(s) {
+  // Split into talker, time, valid, coords, rest
+  const parts = s.match(/^(\$)(..)(RMC,)(\d{6}\.\d{2})(,.+?,)(.+?,.+?,.+?,.+?,.+?)(,....)(.*)/);
+  if (!parts) return s;
+  return `<span class="talker">${parts[1]}${parts[2]}${parts[3]}</span>` +
+         `<span class="time">${parts[4]}</span>` +
+         `<span class="valid">${parts[5]}</span>` +
+         `<span class="coords">${parts[6]}</span>` +
+         `<span class="rest">${parts[7]}${parts[8]}</span>`;
+}
+
+function update() {
+  const now = new Date();
+  const utc = now; // JavaScript Date in UTC
+
+  document.getElementById('utcClock').textContent =
+    pad(utc.getUTCFullYear(),4) + '-' +
+    pad(utc.getUTCMonth()+1,2) + '-' +
+    pad(utc.getUTCDate(),2) + ' ' +
+    pad(utc.getUTCHours(),2) + ':' +
+    pad(utc.getUTCMinutes(),2) + ':' +
+    pad(utc.getUTCSeconds(),2);
+
+  // Shanghai coordinates
+  const lat = 31.2304, lon = 121.4737, speed = 0.0, cog = 0.0, mode = 'A';
+  const dateParts = [utc.getUTCDate(), utc.getUTCMonth()+1, utc.getUTCFullYear()];
+
+  const sentences = [
+    buildRMC('GP', utc, lat, lon, speed, cog, dateParts, mode),
+    buildRMC('BD', utc, lat, lon, speed, cog, dateParts, mode),
+    buildRMC('GN', utc, lat, lon, speed, cog, dateParts, mode),
+    buildRMC('GL', utc, lat, lon, speed, cog, dateParts, mode),
+    buildRMC('GA', utc, lat, lon, speed, cog, dateParts, mode),
+  ];
+
+  let html = '';
+  const labels = {
+    'GP': 'GPS 单系统',
+    'BD': '北斗 单系统',
+    'GN': '多系统联合（GPS+BD+GLONASS+Galileo）',
+    'GL': 'GLONASS 单系统',
+    'GA': 'Galileo 单系统',
+  };
+
+  for (const s of sentences) {
+    const bytes = new TextEncoder().encode(s.sentence);
+    const hex = Array.from(bytes).map(b => b.toString(16).padStart(2,'0').toUpperCase()).join(' ');
+    html += `<div class="item">
+      <div class="label">${labels[s.talker]}</div>
+      <div class="sentence">${colorSentence(s.sentence)}</div>
+      <div class="hex">${hex}</div>
+    </div>`;
+  }
+
+  // Show position fields decoded
+  const r = sentences[0];
+  html += `<div class="item" style="border-color:#333">
+    <div class="label" style="color:#888">字段对照</div>
+    <div class="sentence" style="font-size:12px;line-height:1.8">
+      时间 <span style="color:#00e5ff">hhmmss.ss</span>
+      &nbsp;|&nbsp; 状态 <span style="color:#76ff03">A=有效</span>
+      &nbsp;|&nbsp; 纬度 <span style="color:#b388ff">ddmm.mmmm,N/S</span>
+      &nbsp;|&nbsp; 经度 <span style="color:#b388ff">dddmm.mmmm,E/W</span><br>
+      速度 <span style="color:#90a4ae">节</span>
+      &nbsp;|&nbsp; 航向 <span style="color:#90a4ae">度</span>
+      &nbsp;|&nbsp; 日期 <span style="color:#90a4ae">ddmmyy</span>
+      &nbsp;|&nbsp; ✱校验和
+    </div>
+  </div>`;
+
+  document.getElementById('output').innerHTML = html;
+}
+
+setInterval(update, 1000);
+update();
+</script>
+</body>
+</html>
